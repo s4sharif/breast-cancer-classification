@@ -2,8 +2,6 @@
 
 **An exploratory machine learning project comparing a neural network, ridge logistic regression, and random forest on the Wisconsin Diagnostic Breast Cancer (WDBC) dataset.**
 
-![R](https://img.shields.io/badge/Language-R-276DC3?logo=r&logoColor=white) ![R Markdown](https://img.shields.io/badge/Report-R%20Markdown-75AADB) ![Machine Learning](https://img.shields.io/badge/Focus-Classification-555555)
-
 ## Overview
 
 Can measurements of cell nuclei help distinguish **benign** from **malignant** breast tumors? This project explores that question using the WDBC dataset, with data exploration, feature scaling, model training, and evaluation in **R**.
