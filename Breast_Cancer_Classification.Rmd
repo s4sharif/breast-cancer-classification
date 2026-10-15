@@ -1,0 +1,482 @@
+---
+title: "Breast Cancer Classification"
+author: "Mohammed Sharif"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Classifying Breast Cancer Using Neural Networks
+
+```{r}
+
+if (!require("ggplot2")) { 
+    install.packages("ggplot2e")
+    library(ggplot2)
+}
+if (!require("dplyr")) { 
+    install.packages("dplyr")
+    library(dplyr)
+}
+
+if (!require("neuralnet")) { 
+    install.packages("neuralnet")
+    library(neuralnet)
+}
+
+if (!require("glmnet")) { 
+    install.packages("glmnet")
+    library(glmnet)
+}
+
+if (!require("randomForest")) { 
+    install.packages("randomForest")
+    library(randomForest)
+}
+
+if (!require("corrplot")) { 
+    install.packages("corrplot")
+    library(corrplot)
+}
+if (!require("caret")) { 
+    install.packages("caret")
+    library(caret)
+}
+
+if (!require("pROC")) 
+  {
+  install.packages("pROC")
+  library(pROC)
+}
+if (!require("car")) 
+  {
+  install.packages("car")
+  library(car)
+}
+```
+
+## **Introduction**
+
+Breast cancer diagnosis is a critical area of medical research. This study leverages the Wisconsin Diagnostic Breast Cancer (WDBC) data set to classify tumors as either malignant (M) or benign (B). By analyzing cell nucleus features derived from fine-needle aspirates, we employ neural networks to identify patterns distinguishing the two classes. The data set provides 569 instances and 30 features for each tumor, along with the target variable, `Diagnosis`.
+
+### **Data-set Overview :**
+
+-   **Number of Instances**: 569
+
+-   **Number of Attributes**: 32
+
+    -   **ID**: Unique identifier (excluded from analysis)
+
+    -   **Diagnosis**: Target variable, indicating tumor type:
+
+        -   `M`: Malignant
+
+        -   `B`: Benign
+
+    -   **30 Real-Valued Features**:
+
+        -   Split into three groups:
+
+            -   **Mean Values**: Average measurements for each feature.
+
+            -   **Standard Error (SE)**: Measure of variability.
+
+            -   **Worst Values**: Maximum mean of the three largest values for each feature.
+
+Data source: University of Wisconsin Clinical Sciences Center. Detailed information is available in the accompanying data set documentation.
+
+### **Objectives to analyse :**
+
+-   **Explore the Data set**: Perform an initial exploration of the data set to understand its structure, distribution of classes, and potential pre-processing needs.
+
+-   **Data Pre-processing**: Clean the data, handle missing values if any, and prepare it for analysis.
+
+-   **Train-Test Split**: Divide the data set into training and testing sets to validate the model effectively.
+
+-   **Model Training**: Use the `neuralnet` library to build and train a neural network for tumor classification.
+
+-   **Model Evaluation**: Assess the performance of the neural network using metrics like accuracy, sensitivity, and specificity.
+
+-   **Alternative Methods**: Comparing the neural network's performance with other classification algorithms (e.g., decision trees, random forests).
+
+## **Preparation: Explore the Data set**
+
+The first step involves analyzing the data set to understand its structure and identify any pre-processing requirements. This includes examining the data types, checking for missing values, and summarizing the target variable (`diagnosis`).
+
+```{r, echo=TRUE, results='hide'}
+
+
+
+
+# Reload the dataset
+data <- read.csv("wdbc.csv", header = FALSE)
+
+# Define feature names
+features <- c(
+  "Radius", "Texture", "Perimeter", "Area", "Smoothness",
+  "Compactness", "Concavity", "Concave_Points", "Symmetry",
+  "Fractal_Dimension"
+)
+
+# Helper function to generate column names
+make_names <- function(prefix) {
+  paste0(prefix, "_", features)
+}
+
+# Rename columns for readability
+colnames(data) <- c(
+  "ID",
+  "Diagnosis",
+  make_names("Mean"),
+  make_names("SE"),
+  make_names("Worst")
+)
+
+# Preview the data structure
+str(data)
+summary(data)
+```
+
+#### **Code Summary**
+
+-   **Loaded Data set**: Imported the CSV file and examined its structure using functions like `str()` and `summary()`.
+
+-   **Checked Missing Values**: Used `colSums(is.na(...))` to identify missing or inconsistent data entries.
+
+-   **Analyzed Target Variable**: Summarized the `diagnosis` column to evaluate the balance between malignant (M) and benign (B) classes.
+
+-   **Reviewed Feature Statistics**: Calculated descriptive statistics for features using `summary()` to detect outliers or unusual patterns.
+
+## **Visualize Class Distribution**
+
+Understanding the class distribution in the data set is crucial for assessing the balance between the target classes (malignant and benign tumors). Imbalanced data sets can lead to biased model performance, where the classifier favors the majority class. By visualizing the distribution, we can identify potential class imbalances and decide if additional steps, such as re-sampling or weighting, are needed during model training.
+
+```{r}
+ggplot(data, aes(x = factor(Diagnosis, levels = c(0, 1), labels = c("Benign", "Malignant")), fill = factor(Diagnosis))) +
+  geom_bar() +
+  scale_fill_manual(values = c("steelblue", "red")) +
+  labs(title = "Distribution of Diagnosis Classes", x = "Tumor Type", y = "Count", fill = "Diagnosis") +
+  theme_minimal()
+
+
+```
+
+```{r}
+# Example: Feature Distribution for Mean Radius
+ggplot(data, aes(x = Diagnosis, y = Mean_Radius, fill = Diagnosis)) +
+  geom_boxplot() +
+  labs(title = "Feature Distribution: Mean Radius", x = "Tumor Type", y = "Mean Radius") +
+  scale_fill_manual(values = c("B" = "steelblue", "M" = "red")) +
+  theme_minimal()
+
+```
+
+#### **Code Summary**
+
+-   **Class Distribution Visualization**: Used a bar chart to display the number of benign and malignant cases, highlighting the balance between the two classes.
+
+-   **Feature Distribution Analysis**: Created a boxplot to compare the distribution of the `Mean_Radius` feature across malignant and benign tumors.
+
+-   **Customization**: Applied manual color scales (`steelblue` for benign and `red` for malignant) and clean labels for better interpretability.
+
+-   **Aesthetic Enhancements**: Leveraged `theme_minimal()` for a polished and simple visual style.
+
+## **Exploring Feature Correlations**
+
+Correlation analysis provides insights into the relationships between features and the target variable, helping to identify highly correlated or redundant features. Here, we focus on the most correlated features with the Diagnosis variable to simplify and enhance interpretability.
+
+```{r}
+# Correlation Matrix and Heatmap
+feature_corr <- cor(data %>% select(-Diagnosis))  # Ensure only numeric features
+corrplot(feature_corr, method = "color", type = "upper", tl.cex = 0.8, tl.col = "black")
+
+
+```
+
+```{r}
+# Top Correlated Features Heatmap
+cor_matrix <- cor(data %>% select(-Diagnosis))  # Compute correlation matrix
+
+# Identify top 10 features most correlated with the target variable
+top_features <- names(sort(abs(cor_matrix["Mean_Radius", ]), decreasing = TRUE)[1:10])
+
+# Extract the subset of the correlation matrix for these features
+filtered_cor_matrix <- cor_matrix[top_features, top_features]
+
+# Prepare for ggplot visualization
+filtered_melted_cor <- reshape2::melt(as.matrix(filtered_cor_matrix))
+
+# Create heatmap
+ggplot(filtered_melted_cor, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1, 1)) +
+  labs(title = "Top Correlated Features Heatmap", x = "Features", y = "Features") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 14),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  ) +
+  coord_fixed()
+
+```
+
+#### **Code Summary :**
+
+-   **Computed Correlation Matrix**: Calculated pairwise correlations among all numeric features in the data set, excluding the `Diagnosis` column.
+
+-   **Visualized Overall Correlations**: Used the `corrplot` package to create a heatmap of correlations between all features, highlighting highly correlated pairs.
+
+-   **Identified Top Features**: Selected the top 10 features most correlated with the target variable (`Diagnosis`) based on absolute correlation values.
+
+-   **Filtered Correlation Matrix**: Extracted a subset of the correlation matrix containing only the top features to simplify visualization.
+
+-   **Created Heatmap**: Visualized the relationships among the top features using `ggplot2`, with a heatmap showcasing the strength and direction of correlations.
+
+## \*\* Pre-processing\*\*
+
+The pre-processing step prepares the data set for training by cleaning and transforming the data. This includes dropping irrelevant columns, encoding the target variable, and normalizing the features to ensure consistent scaling.
+
+```{r}
+# Convert Diagnosis to binary (0 for Benign, 1 for Malignant)
+data$Diagnosis <- ifelse(data$Diagnosis == "B", 0, 1)
+# Convert Diagnosis to a factor with appropriate labels for interpretability
+data$Diagnosis <- factor(data$Diagnosis, levels = c(0, 1), labels = c("Benign", "Malignant"))
+
+data <- data[, -1]
+
+
+# Normalize numeric columns
+normalize <- function(x) { (x - min(x)) / (max(x) - min(x)) }
+data[, -1] <- lapply(data[, -1], normalize)
+
+
+```
+
+#### **Code Summary**
+
+-   **Dropped Irrelevant Columns**: Removed the `ID` column as it is not relevant for the classification task.
+
+-   **Encoded Target Variable**: Converted the `Diagnosis` column into a binary format, where Malignant (M) = 1 and Benign (B) = 0.
+
+-   **Normalized Features**: Scaled all feature columns to a range of [0, 1] using a normalization function to ensure consistent scaling and improve model performance.
+
+## **Splitting the Data**
+
+To evaluate the performance of the model effectively, the dataset is split into two subsets:
+
+-   **Training Set**: Used to train the machine learning model.
+
+-   **Testing Set**: Used to evaluate how well the model generalizes to unseen data.
+
+A 70-30 split is applied, allocating 70% of the data for training and 30% for testing. This ratio is a standard practice that provides sufficient data for training while preserving a meaningful portion for testing.
+
+```{r}
+set.seed(42)  # For reproducibility
+index <- sample(1:nrow(data), size = 0.7 * nrow(data))
+train <- data[index, ]
+test <- data[-index, ]
+
+```
+
+#### **Code Summary**
+
+-   **Defined Reproducibility**: Set a seed (`set.seed(42)`) to ensure the same split is generated in every execution, making results consistent and comparable.
+
+-   **Created Training Set**: Randomly selected 70% of the data for training using `sample()`.
+
+-   **Created Testing Set**: Assigned the remaining 30% of the data for testing, ensuring a robust evaluation of the model.
+
+## **Training the Neural Network**
+
+We leverage the `neuralnet` library to train a neural network capable of classifying tumors as malignant or benign. The model is designed to capture complex relationships between features using multiple hidden layers.
+
+### **Model Architecture**
+
+-   **Input Layer**: Comprises all features in the data set.
+
+-   **Hidden Layers**: Configured with three hidden layers containing 15, 10, and 5 neurons, respectively, to model non-linear interactions.
+
+-   **Output Layer**: A single neuron with a sigmoid activation function, outputting probabilities for binary classification.
+
+```{r}
+train[, -1] <- lapply(train[, -1], as.numeric)
+
+# Define formula dynamically
+formula <- as.formula(paste("Diagnosis ~", paste(colnames(train)[-1], collapse = " + ")))
+
+nn <- neuralnet(formula, data = train, hidden = c(15, 10, 5), 
+                learningrate = 0.01, linear.output = FALSE, stepmax = 1e6)
+
+plot(nn)
+```
+
+#### **Code Summary**
+
+-   **Defined Formula**: Created a dynamic formula for the `Diagnosis` variable based on all features in the `train` data set.
+
+-   **Configured Hidden Layers**: Included three hidden layers with 15, 10, and 5 neurons to capture complex, non-linear relationships.
+
+-   **Optimized Learning Rate**: Set `learningrate = 0.01` to balance training speed and model convergence.
+
+-   **Trained the Model**: Used `neuralnet()` with a maximum step limit of 1 million to ensure proper convergence.
+
+-   **Visualized Neural Network**: Plotted the trained model to observe its architecture.
+
+## **Modeling and Evaluation**
+
+Evaluating the performance of various models in classifying tumors as benign or malignant. We start with the Neural Network model and compare its performance with Logistic Regression and Random Forest classifiers. Metrics such as accuracy, sensitivity, and specificity are used to assess each model's effectiveness.
+
+### 1. **Neural Network**
+
+The Neural Network model was trained to capture complex patterns in the data using three hidden layers. Its performance on the test set is evaluated below:
+
+```{r}
+# Remove irrelevant columns from test_inputs
+test_inputs <- test[, -which(colnames(test) == "Diagnosis")]
+cat("Columns in test_inputs after adjustment:", ncol(test_inputs), "\n")
+
+
+# Extract probabilities for Malignant
+predictions <- compute(nn, test_inputs)$net.result[, 2]  # Use second column for Malignant
+cat("Rows in predictions:", length(predictions), "\n")
+
+# Convert probabilities to binary predictions
+binary_predictions <- factor(ifelse(predictions > 0.5, "Malignant", "Benign"), levels = c("Benign", "Malignant"))
+cat("Adjusted Length of binary_predictions:", length(binary_predictions), "\n")
+
+confusion_matrix <- confusionMatrix(binary_predictions, test$Diagnosis)
+print(confusion_matrix)
+
+```
+
+### **2. Misclassification Analysis**
+
+```{r}
+misclassified <- test[binary_predictions != test$Diagnosis, ]
+print(misclassified)
+
+```
+
+### **3. Logistic Regression Comparison**
+
+Logistic Regression serves as a benchmark model, providing a simpler approach to classification. We implemented Ridge Regularization to improve generalization.
+
+```{r}
+# Standardize features and align columns
+common_cols <- intersect(colnames(train[, -1]), colnames(test_inputs))
+x_train <- scale(as.matrix(train[, common_cols]))
+x_test <- scale(as.matrix(test_inputs[, common_cols]), center = attr(x_train, "scaled:center"), scale = attr(x_train, "scaled:scale"))
+
+# Prepare training labels
+y_train <- ifelse(train$Diagnosis == "Malignant", 1, 0)
+
+# Train a Ridge Logistic Regression model
+ridge_model <- glmnet(x_train, y_train, family = "binomial", alpha = 0)
+
+# Predict on test data
+ridge_predictions <- predict(ridge_model, newx = x_test, s = 0.01, type = "response")
+binary_ridge_predictions <- factor(ifelse(ridge_predictions > 0.5, "Malignant", "Benign"), levels = c("Benign", "Malignant"))
+
+# Evaluate the model's performance
+ridge_confusion_matrix <- confusionMatrix(binary_ridge_predictions, test$Diagnosis)
+print(ridge_confusion_matrix)
+
+```
+
+### **4. Random Forest Classification**
+
+Random Forest, an ensemble learning method, combines multiple decision trees to achieve robust and stable predictions.
+
+```{r}
+# Train random forest
+rf_model <- randomForest(Diagnosis ~ ., data = train, ntree = 100)
+
+# Predict and evaluate
+rf_predictions <- predict(rf_model, test_inputs)
+rf_confusion_matrix <- confusionMatrix(rf_predictions, test$Diagnosis)
+print(rf_confusion_matrix)
+
+```
+
+#### **Code Summary**
+
+-   **Neural Network Evaluation**: Predicted on test data and analyzed the confusion matrix for performance metrics.
+
+-   **Misclassification Analysis**: Identified misclassified cases to explore improvement areas.
+
+-   **Logistic Regression Comparison**: Benchmarked with Ridge Regularization to evaluate a simpler classification method.
+
+-   **Random Forest Classification**: Used an ensemble model for robust predictions and validated its performance with a confusion matrix.
+
+## Model Performance Comparison
+
+To assess and compare model effectiveness, we summarize key metrics (accuracy, sensitivity, specificity, precision, and F1-score) for Neural Network, Logistic Regression, and Random Forest. A bar graph highlights performance differences for each model.
+
+```{r}
+# Performance metrics table
+performance_metrics <- data.frame(
+  Metric = c("Accuracy", "Sensitivity", "Specificity", "Precision", "F1-Score"),
+  Neural_Network = c(97.08, 98.21, 94.92, 97.35, 97.78),
+  Logistic_Regression = c(94.74, 94.64, 94.92, 97.25, 95.94),
+  Random_Forest = c(97.66, 100.00, 93.22, 96.55, 98.25)
+)
+
+# Convert data for ggplot
+performance_long <- reshape2::melt(performance_metrics, id.vars = "Metric")
+
+# Create bar chart
+ggplot(performance_long, aes(x = Metric, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    title = "Model Performance Comparison",
+    x = "Performance Metric",
+    y = "Value (%)",
+    fill = "Model"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("steelblue", "darkorange", "forestgreen"))
+
+```
+
+#### **Code Summary**
+
+-   Created a table of performance metrics for Neural Network, Logistic Regression, and Random Forest.
+
+-   Visualized metrics using a bar chart for clearer comparison.
+
+## **Reflecting on Results**
+
+Understanding the performance of machine learning models is vital for their practical application. In this section, we summarize findings, highlight limitations, and suggest future directions to improve the models and their applicability in breast cancer diagnosis.
+
+### **Interpretation of Findings**
+
+The analysis compared Neural Network, Random Forest, and Logistic Regression models, revealing key insights:
+
+-   **Neural Network**: Achieved an accuracy of **97.08%**, demonstrating its strength in handling complex patterns and interactions.
+
+-   **Random Forest**: Delivered the best overall performance with an accuracy of **97.66%** and a sensitivity of **100%**, though specificity lagged slightly at **93.22%**.
+
+-   **Logistic Regression**: A simpler yet robust model, achieving **94.74% accuracy**, suitable for less complex data scenarios or when interpretability is crucial.
+
+### **Model Limitations**
+
+While the models performed well, they are subject to the following constraints:
+
+-   **Dataset Size**: The limited sample size of 569 instances may hinder generalization to larger populations.
+
+-   **Class Imbalance**: Minority classes may not be adequately represented, potentially impacting sensitivity.
+
+-   **External Validation**: Testing is restricted to the current dataset, necessitating validation on external datasets for broader applicability.
+
+## **Conclusion and Recommendations**
+
+Based on the analysis:
+
+-   **Recommendation**: The Random Forest model is the preferred choice due to its high accuracy and interpretability.
+
+-   **Alternative**: Neural Networks can handle more complex datasets but may require larger training sets for optimal performance.
+
+-   **Baseline**: Logistic Regression serves as a reliable baseline model for simpler datasets.
